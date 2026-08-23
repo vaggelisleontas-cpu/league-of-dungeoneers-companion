@@ -549,9 +549,20 @@ function normalizeParty(p) {
 // unchanged — it's a redistribution, not a windfall. Runs once per campaign: after
 // migrating, party.coinsMigrated is set so this never re-runs and clobbers real coins.
 // Must run on raw loaded data, before normalizeHero fills in a default `coins` of 150.
+//
+// Guarded two independent ways on purpose: the `coinsMigrated` flag is the primary
+// guard, but flag writes can in principle fail to persist (storage error, etc.) without
+// the app ever knowing, and if that flag doesn't stick, this would silently re-run on
+// every future load, overwriting each hero's real personal coins with an even split of
+// whatever's currently in the Party Pot — a real, hard-to-notice data loss bug. The
+// second guard (every hero already has a real numeric `coins` value) is independent of
+// that flag: only a pre-migration save (from before personal pouches existed at all)
+// would have heroes with no `coins` field yet, so once every hero has one, migration
+// has already happened in effect and must never run again, flag or no flag.
 function migrateHeroCoins(rawHeroes, rawParty) {
   const heroes = rawHeroes || [];
-  if (rawParty?.coinsMigrated || heroes.length === 0) {
+  const alreadyMigratedInPractice = heroes.length > 0 && heroes.every((h) => typeof h.coins === "number");
+  if (rawParty?.coinsMigrated || alreadyMigratedInPractice || heroes.length === 0) {
     return { heroes, party: { ...(rawParty || {}), coinsMigrated: true } };
   }
   const total = Number(rawParty?.coins) || 0;
@@ -3730,6 +3741,16 @@ function BuyMeACoffeeButton() {
 
 // ---------- Changelog ----------
 const CHANGELOG_DATA = [
+  {
+    version: "1.53.1",
+    date: "2026-08-23",
+    sections: {
+      "Fixed": [
+        "Data-safety hardening, prompted by a real coin-pouch corruption report. The one-time coin-pouch migration from v1.51.0 relied solely on a coinsMigrated flag to guarantee it only ever ran once; if that flag ever failed to persist, the migration would silently re-run on every future load, overwriting every hero's real personal coins with an even split of the current Party Pot. It's now also guarded independently: if every hero already has a real numeric coins value, the migration is treated as already done regardless of the flag, so it can't re-fire and flatten personal pouches again",
+        "Loading the active campaign on startup silently fell back to a brand-new blank campaign if its saved data ever failed to read — and the very next autosave would then persist that blank campaign right over the real one on disk. It now shows a \"Couldn't load your campaign\" screen with a Reload button instead, and never writes anything until a real read succeeds",
+      ],
+    },
+  },
   {
     version: "1.53.0",
     date: "2026-08-23",
@@ -15907,6 +15928,14 @@ export default function App() {
     setTab(targetTab);
   };
   const [loaded, setLoaded] = useState(false);
+  // Set only when the active campaign's data blob genuinely failed to read (as opposed
+  // to a normal empty state, which uses idx.length === 0 below). Loading stays blocked
+  // in this case rather than silently falling back to a brand-new blank campaign — a
+  // silent fallback here previously meant a transient storage read hiccup could load an
+  // empty campaign in place of a real one, which the very next autosave would then
+  // persist over the real, still-intact data on disk. Better to stop and let the person
+  // retry than to risk that.
+  const [loadError, setLoadError] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [switchingLabel, setSwitchingLabel] = useState("Loading campaign…");
   const [saveState, setSaveState] = useState("idle"); // idle | saving | saved | error
@@ -15977,7 +16006,14 @@ export default function App() {
           setCampaigns(idx);
           const activeId = activeIdRes && idx.find((c) => c.id === activeIdRes) ? activeIdRes : idx[0].id;
           const cRes = await window.storage.get(campaignKey(activeId), false);
-          const data = cRes && cRes.value ? JSON.parse(cRes.value) : { heroes: [defaultHero()], party: defaultParty(), log: [] };
+          if (!cRes || !cRes.value) {
+            // The index says this campaign should exist, but its data blob didn't come
+            // back — stop here rather than silently substituting a blank campaign, which
+            // the next autosave would otherwise persist right over the real save.
+            setLoadError(true);
+            return;
+          }
+          const data = JSON.parse(cRes.value);
           const migrated = migrateHeroCoins(data.heroes || [defaultHero()], data.party);
           setHeroes(migrated.heroes.map(normalizeHero));
           setParty(normalizeParty(migrated.party));
@@ -16161,6 +16197,28 @@ export default function App() {
     { label: "Core Loop", items: tabs },
     { label: "World & Campaign", items: tabs2 },
   ];
+
+  if (loaded && loadError) {
+    return (
+      <div style={{ minHeight: "100vh", background: palette.parchment, fontFamily: "Crimson Pro, serif" }} className="flex items-center justify-center px-4">
+        <div className="max-w-sm rounded-xl p-5 text-center" style={{ background: palette.panel, border: `1px solid ${palette.line}` }}>
+          <h1 style={{ fontFamily: "Cinzel, serif", color: palette.crimson }} className="text-lg font-bold mb-2">
+            Couldn't load your campaign
+          </h1>
+          <p className="text-sm mb-4" style={{ color: palette.inkSoft, fontFamily: "Crimson Pro, serif" }}>
+            Your saved data is still there — this device just couldn't read it just now. Nothing has been changed or overwritten. Try reloading; if it keeps happening, your browser's storage may need attention rather than the app.
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 rounded-lg text-sm font-bold"
+            style={{ background: palette.crimson, color: palette.parchment, fontFamily: "Cinzel, serif" }}
+          >
+            Reload
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: palette.parchment, fontFamily: "Crimson Pro, serif" }}>

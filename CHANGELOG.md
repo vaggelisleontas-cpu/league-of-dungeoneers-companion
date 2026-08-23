@@ -3,6 +3,12 @@
 All notable changes to this project are documented here, following
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) conventions.
 
+## [1.53.1] — 2026-08-23
+
+### Fixed
+- **Data-safety hardening, prompted by a real coin-pouch corruption report.** The one-time coin-pouch migration from v1.51.0 relied solely on a `coinsMigrated` flag to guarantee it only ever ran once; if that flag ever failed to persist, the migration would silently re-run on every future load, overwriting every hero's real personal coins with an even split of the current Party Pot. It's now also guarded independently: if every hero already has a real numeric `coins` value, the migration is treated as already done regardless of the flag, so it can't re-fire and flatten personal pouches again
+- Loading the active campaign on startup silently fell back to a brand-new blank campaign if its saved data ever failed to read — and the very next autosave would then persist that blank campaign right over the real one on disk. It now shows a "Couldn't load your campaign" screen with a Reload button instead, and never writes anything until a real read succeeds
+
 ## [1.53.0] — 2026-08-23
 
 ### Added
