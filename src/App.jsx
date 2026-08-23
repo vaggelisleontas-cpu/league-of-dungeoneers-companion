@@ -3742,6 +3742,16 @@ function BuyMeACoffeeButton() {
 // ---------- Changelog ----------
 const CHANGELOG_DATA = [
   {
+    version: "1.54.0",
+    date: "2026-08-23",
+    sections: {
+      "Added": [
+        "Quick Finds on the Dice tab's Loot Roller panel: one-tap \"Spell Scroll\", \"Ingredient\", and \"Part\" buttons for Treasure Card or furniture results that just say \"1 random X\" with no skill check involved. Rolls a uniform-random result and sends it straight to a chosen hero's backpack (scrolls) or Alchemy Components (ingredients/parts)",
+        "A toast notification now confirms every Quick Find and Loot Roller scroll pickup (e.g. \"Found: Scroll of Fireball — Sent to Thorn's backpack\"), so it's not easy to miss after scrolling away from the result",
+      ],
+    },
+  },
+  {
     version: "1.53.2",
     date: "2026-08-23",
     sections: {
@@ -13841,7 +13851,7 @@ function CombatCalc({ heroes, updateHero, addLog, pushToast }) {
 }
 
 // ---------- Dice Tray ----------
-function DiceTray({ party, setParty, heroes, updateHero, addLog }) {
+function DiceTray({ party, setParty, heroes, updateHero, addLog, pushToast }) {
   const [rolls, setRolls] = useState([]);
   const doRoll = (sides, label) => {
     const r = sides === 100 ? rollPercent() : rollDie(sides);
@@ -13866,13 +13876,34 @@ function DiceTray({ party, setParty, heroes, updateHero, addLog }) {
     const randomScroll = result === "1 random scroll" ? SPELLS[Math.floor(Math.random() * SPELLS.length)].name : null;
     setLootRolls((prev) => [{ tableKey, r, result, randomScroll, added: false, id: uid() }, ...prev].slice(0, 8));
   };
+  // Quick Finds: for Treasure Card / furniture results that just say "1 random scroll",
+  // "1 random ingredient", or "1 random part" with no skill check involved — a guaranteed find.
+  const rollQuickFind = (kind) => {
+    let detail;
+    if (kind === "scroll") detail = SPELLS[Math.floor(Math.random() * SPELLS.length)].name;
+    else if (kind === "ingredient") detail = ALCHEMY_INGREDIENT_NAMES[Math.floor(Math.random() * ALCHEMY_INGREDIENT_NAMES.length)];
+    else if (kind === "part") detail = ALCHEMY_PART_NAMES[Math.floor(Math.random() * ALCHEMY_PART_NAMES.length)];
+    setLootRolls((prev) => [{ kind, detail, added: false, id: uid() }, ...prev].slice(0, 8));
+  };
   const addLootScroll = (entryId) => {
     const hero = heroes.find((h) => h.id === lootScrollHero);
     const entry = lootRolls.find((l) => l.id === entryId);
-    if (!hero || !entry || !entry.randomScroll) return;
-    updateHero({ ...hero, backpack: [...hero.backpack, { id: uid(), name: `Scroll of ${entry.randomScroll}`, value: "", enc: 1, dur: "1" }] });
+    if (!hero || !entry) return;
+    if (entry.randomScroll || entry.kind === "scroll") {
+      const spellName = entry.randomScroll || entry.detail;
+      updateHero({ ...hero, backpack: [...hero.backpack, { id: uid(), name: `Scroll of ${spellName}`, value: "", enc: 1, dur: "1" }] });
+      addLog && addLog(`${hero.name} finds a Scroll of ${spellName}.`);
+      pushToast && pushToast(`Found: Scroll of ${spellName}`, `Sent to ${hero.name}'s backpack.`);
+    } else if (entry.kind === "ingredient" || entry.kind === "part") {
+      const type = entry.kind === "ingredient" ? "Ingredient" : "Part";
+      const next = addAlchemyComponent(hero, entry.detail, type, 1, false);
+      updateHero({ ...hero, alchemyComponents: next });
+      addLog && addLog(`${hero.name} finds 1 ${entry.detail} (${type}).`);
+      pushToast && pushToast(`Found: ${entry.detail}`, `Sent to ${hero.name}'s Alchemy Components.`);
+    } else {
+      return;
+    }
     setLootRolls((prev) => prev.map((l) => (l.id === entryId ? { ...l, added: true } : l)));
-    addLog && addLog(`${hero.name} finds a Scroll of ${entry.randomScroll}.`);
   };
 
 
@@ -13946,10 +13977,36 @@ function DiceTray({ party, setParty, heroes, updateHero, addLog }) {
             </button>
           ))}
         </div>
+        <p className="text-xs mb-2" style={{ fontFamily: "Crimson Pro, serif", color: palette.inkSoft, fontStyle: "italic" }}>
+          Quick Finds — for Treasure Cards or other results that just say "1 random scroll / ingredient / part", no skill check needed.
+        </p>
+        <div className="flex flex-wrap gap-2 mb-3">
+          <button
+            onClick={() => rollQuickFind("scroll")}
+            className="flex items-center gap-1 px-3 py-2 rounded font-bold text-sm"
+            style={{ background: palette.forest, color: palette.parchment, fontFamily: "Cinzel, serif" }}
+          >
+            <ScrollText size={14} /> Spell Scroll
+          </button>
+          <button
+            onClick={() => rollQuickFind("ingredient")}
+            className="flex items-center gap-1 px-3 py-2 rounded font-bold text-sm"
+            style={{ background: palette.forest, color: palette.parchment, fontFamily: "Cinzel, serif" }}
+          >
+            <Wheat size={14} /> Ingredient
+          </button>
+          <button
+            onClick={() => rollQuickFind("part")}
+            className="flex items-center gap-1 px-3 py-2 rounded font-bold text-sm"
+            style={{ background: palette.forest, color: palette.parchment, fontFamily: "Cinzel, serif" }}
+          >
+            <Skull size={14} /> Part
+          </button>
+        </div>
         <div className="space-y-1.5">
-          {lootRolls.some((l) => l.randomScroll && !l.added) && (
+          {lootRolls.some((l) => (l.randomScroll || l.kind) && !l.added) && (
             <label className="text-xs block mb-2" style={{ fontFamily: "Crimson Pro, serif", color: palette.inkSoft }}>
-              Hero to receive a found scroll
+              Hero to receive a found item
               <select
                 value={lootScrollHero}
                 onChange={(e) => setLootScrollHero(e.target.value)}
@@ -13963,20 +14020,31 @@ function DiceTray({ party, setParty, heroes, updateHero, addLog }) {
           )}
           {lootRolls.map((l) => (
             <div key={l.id} className="rounded p-2" style={{ background: "#00000010" }}>
-              <div className="flex items-center gap-2 text-xs" style={{ fontFamily: "Crimson Pro, serif", color: palette.ink }}>
-                <span className="font-bold px-1.5 py-0.5 rounded" style={{ background: palette.crimsonDark, color: palette.parchment, fontFamily: "JetBrains Mono, monospace" }}>{l.tableKey}: {l.r}</span>
-                {l.result}
-              </div>
-              {l.randomScroll && (
+              {l.tableKey ? (
+                <div className="flex items-center gap-2 text-xs" style={{ fontFamily: "Crimson Pro, serif", color: palette.ink }}>
+                  <span className="font-bold px-1.5 py-0.5 rounded" style={{ background: palette.crimsonDark, color: palette.parchment, fontFamily: "JetBrains Mono, monospace" }}>{l.tableKey}: {l.r}</span>
+                  {l.result}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-xs" style={{ fontFamily: "Crimson Pro, serif", color: palette.ink }}>
+                  <span className="font-bold px-1.5 py-0.5 rounded" style={{ background: palette.forest, color: palette.parchment, fontFamily: "JetBrains Mono, monospace" }}>
+                    Quick Find
+                  </span>
+                  {l.kind === "scroll" ? "Random Spell Scroll" : l.kind === "ingredient" ? "Random Ingredient" : "Random Part"}
+                </div>
+              )}
+              {(l.randomScroll || l.kind) && (
                 <div className="flex items-center justify-between mt-1.5 text-xs">
-                  <span style={{ fontFamily: "Crimson Pro, serif", color: palette.inkSoft }}>Rolled: Scroll of {l.randomScroll}</span>
+                  <span style={{ fontFamily: "Crimson Pro, serif", color: palette.inkSoft }}>
+                    Rolled: {l.randomScroll ? `Scroll of ${l.randomScroll}` : l.kind === "scroll" ? `Scroll of ${l.detail}` : l.detail}
+                  </span>
                   <button
                     onClick={() => addLootScroll(l.id)}
                     disabled={l.added || !lootScrollHero}
                     className="text-[10px] px-2 py-1 rounded font-semibold"
                     style={{ background: l.added ? "#00000015" : palette.crimsonDark, color: l.added ? palette.inkSoft : palette.parchment, opacity: !lootScrollHero && !l.added ? 0.5 : 1 }}
                   >
-                    {l.added ? "Added" : "Add to Backpack"}
+                    {l.added ? "Added" : (l.randomScroll || l.kind === "scroll") ? "Add to Backpack" : "Add to Components"}
                   </button>
                 </div>
               )}
@@ -16432,7 +16500,7 @@ export default function App() {
         {tab === "combat" && <CombatCalc heroes={heroes} updateHero={(next) => updateHero(next.id, next)} addLog={addLog} pushToast={pushToast} />}
         {tab === "alchemy" && <AlchemyTab heroes={heroes} updateHero={(next) => updateHero(next.id, next)} addLog={addLog} />}
         {tab === "actions" && <ActionsTray party={party} setParty={setParty} heroes={heroes} updateHero={updateHero} addLog={addLog} />}
-        {tab === "dice" && <DiceTray party={party} setParty={setParty} heroes={heroes} updateHero={(next) => updateHero(next.id, next)} addLog={addLog} />}
+        {tab === "dice" && <DiceTray party={party} setParty={setParty} heroes={heroes} updateHero={(next) => updateHero(next.id, next)} addLog={addLog} pushToast={pushToast} />}
         {tab === "quest" && <QuestRollerPanel party={party} setParty={setParty} addLog={addLog} />}
         {tab === "compendium" && <CompendiumTab heroes={heroes} updateHero={(next) => updateHero(next.id, next)} addLog={addLog} initialCat={compendiumInitialCat} initialHero={compendiumInitialHero} />}
         {tab === "lore" && <LoreTab goToTab={goToTab} />}

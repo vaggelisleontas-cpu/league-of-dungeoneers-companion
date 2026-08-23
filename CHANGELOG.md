@@ -3,6 +3,12 @@
 All notable changes to this project are documented here, following
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) conventions.
 
+## [1.54.0] — 2026-08-23
+
+### Added
+- Quick Finds on the Dice tab's Loot Roller panel: one-tap "Spell Scroll", "Ingredient", and "Part" buttons for Treasure Card or furniture results that just say "1 random X" with no skill check involved. Rolls a uniform-random result and sends it straight to a chosen hero's backpack (scrolls) or Alchemy Components (ingredients/parts)
+- A toast notification now confirms every Quick Find and Loot Roller scroll pickup (e.g. "Found: Scroll of Fireball — Sent to Thorn's backpack"), so it's not easy to miss after scrolling away from the result
+
 ## [1.53.2] — 2026-08-23
 
 ### Added
