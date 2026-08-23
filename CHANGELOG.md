@@ -3,6 +3,14 @@
 All notable changes to this project are documented here, following
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) conventions.
 
+## [1.53.2] — 2026-08-23
+
+### Added
+- Footer: a "Found a bug? Report it here" link next to Changelog, opening the GitHub issues page in a new tab
+
+### Fixed
+- Rest at Inn: HP, Mana, Luck, and Energy recovery was calculated and shown in the confirmation summary and log, but never actually applied to the hero sheets, due to a mismatched function signature between the Settlement tab and the underlying hero-update call. Resting now correctly updates every selected hero's stats
+
 ## [1.53.1] — 2026-08-23
 
 ### Fixed

@@ -3742,6 +3742,18 @@ function BuyMeACoffeeButton() {
 // ---------- Changelog ----------
 const CHANGELOG_DATA = [
   {
+    version: "1.53.2",
+    date: "2026-08-23",
+    sections: {
+      "Added": [
+        "Footer: a \"Found a bug? Report it here\" link next to Changelog, opening the GitHub issues page in a new tab",
+      ],
+      "Fixed": [
+        "Rest at Inn: HP, Mana, Luck, and Energy recovery was calculated and shown in the confirmation summary and log, but never actually applied to the hero sheets, due to a mismatched function signature between the Settlement tab and the underlying hero-update call. Resting now correctly updates every selected hero's stats",
+      ],
+    },
+  },
+  {
     version: "1.53.1",
     date: "2026-08-23",
     sections: {
@@ -5236,13 +5248,24 @@ function Footer() {
       <p className="text-xs text-center" style={{ color: palette.inkSoft, fontFamily: "Crimson Pro, serif" }}>
         © 2026 Luke Wilson. Designed by Luke Wilson.
       </p>
-      <button
-        onClick={() => setShowChangelog(true)}
-        className="text-xs underline"
-        style={{ color: palette.inkSoft, fontFamily: "Crimson Pro, serif" }}
-      >
-        Changelog
-      </button>
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => setShowChangelog(true)}
+          className="text-xs underline"
+          style={{ color: palette.inkSoft, fontFamily: "Crimson Pro, serif" }}
+        >
+          Changelog
+        </button>
+        <a
+          href="https://github.com/MrLewk/league-of-dungeoneers-companion/issues"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs underline"
+          style={{ color: palette.inkSoft, fontFamily: "Crimson Pro, serif" }}
+        >
+          Found a bug? Report it here
+        </a>
+      </div>
       <p className="text-[11px] text-center max-w-md" style={{ color: palette.inkSoft, fontFamily: "Crimson Pro, serif", fontStyle: "italic", opacity: 0.8 }}>
         League of Dungeoneers and all associated game content © 2026 von Braus Publishing. All rights reserved.
         This is an unofficial fan-made companion tool, not affiliated with or endorsed by von Braus Publishing.
@@ -8476,7 +8499,7 @@ function SettlementTab({ party, setParty, heroes, updateHero, addLog, goToGuilds
         summary.push(`${hero.name}: slept in the stable (couldn't afford the inn) — +${roll} HP (${newHp}/${hero.hp.max}), half Mana/Luck/Energy regained`);
         addLog(`${hero.name} couldn't afford the inn, slept in the stable: +${roll} HP, half Mana/Luck/Energy regained.`);
       }
-      updateHero(hero.id, {
+      updateHero({
         ...hero,
         hp: { ...hero.hp, cur: newHp },
         mana: { ...hero.mana, cur: newMana },
