@@ -3,7 +3,7 @@ import {
   Plus, Minus, Trash2, Flame, Heart, Zap, Brain, Sparkles, Dice5,
   Swords, Shield, BookOpen, Users, Skull,
   RotateCcw, Coins, Wheat, ScrollText, Pencil, Check, X, FolderOpen, Loader2, Map, Download, Upload,
-  Landmark, Bed, ClipboardList, Timer, Flashlight, FlaskConical, Library, ChevronUp, ShieldAlert
+  Landmark, Bed, ClipboardList, Timer, Flashlight, FlaskConical, Library, ChevronUp, ShieldAlert, ShoppingCart
 } from "lucide-react";
 import { useRegisterSW } from "virtual:pwa-register/react";
 
@@ -1185,6 +1185,14 @@ const ARMOUR_AND_SHIELDS = [
   { name: "Nightstalker Bracers", tier: 2, def: 4, enc: 3, covers: ["arms"], special: "High Quality (DUR 8)", cost: 150, avail: 3, dur: 8 },
 ];
 const NIGHTSTALKER_ARMOUR_NAMES = ["Nightstalker Cap", "Nightstalker Vest", "Nightstalker Jacket", "Nightstalker Pants", "Nightstalker Bracers"];
+
+// Weapons/Armour catalog entries for the Blacksmith's "Buy Gear" panel — same GuildShopList
+// component the guild shops already use, just fed the base equipment tables instead of a
+// guild's special-equipment list. Neither table carries its own `dur` field (durability is
+// tracked separately once equipped), so it's added here at the rulebook default of 6, except
+// where an entry already specifies a higher value (e.g. Nightstalker's High Quality DUR 8).
+const BUYABLE_WEAPONS = WEAPONS.map((w) => ({ ...w, dur: w.dur || 6 }));
+const BUYABLE_ARMOUR = ARMOUR_AND_SHIELDS.map((a) => ({ ...a, dur: a.dur || 6 }));
 
 // Stacking Armour special rule (rulebook, unreleased update page shared by the designer):
 // the higher-tier piece is normally the outer layer (full DEF, takes DUR hits first);
@@ -3722,6 +3730,19 @@ function BuyMeACoffeeButton() {
 
 // ---------- Changelog ----------
 const CHANGELOG_DATA = [
+  {
+    version: "1.53.0",
+    date: "2026-08-23",
+    sections: {
+      "Added": [
+        "Buy Gear panel on the Settlement tab, right below Sell & Repair — Weapons and Armour & Shields (Blacksmith) and General Equipment (General Store / Magic Brewery), using the same \"roll 1d6 vs Availability, deduct cost, drop into the chosen hero's backpack\" mechanic the Guild shops already use. All three are collapsible accordion sections (only one open at a time, matching the Guilds tab's pattern) so the panel doesn't turn into one long scroll on mobile. General Equipment also gets category filter chips (Alchemy, Consumables, Jewellery, Light, Misc, Tools) since it's ~35 items across 6 categories",
+        "Desktop left sidebar (1024px+): the header and both scrolling tab rows collapse into a sticky sidebar with all 16 tabs grouped under \"Core Loop\" and \"World & Campaign\", freeing up the wide empty margins a centered mobile-first layout leaves on a desktop screen. Mobile/tablet layout below 1024px is completely unchanged — same header, same two tab rows, same behavior",
+      ],
+      "Fixed": [
+        "Sell & Repair: selling a named backpack item (as opposed to an equipped weapon or worn armour) always showed 0 Lost Durability regardless of its actual condition, since backpack items store durability as a free-text \"cur/max\" string rather than the structured field weapons/armour use, and the Sell panel wasn't parsing it. Now parses the same way the rest of the app already does, so a Longsword at 2/6 correctly shows 4 Lost Durability and the right sell value",
+      ],
+    },
+  },
   {
     version: "1.52.1",
     date: "2026-08-22",
@@ -8163,6 +8184,8 @@ function SettlementTab({ party, setParty, heroes, updateHero, addLog, goToGuilds
   const [repairPoints, setRepairPoints] = useState(1);
   const [repairPaySource, setRepairPaySource] = useState("party");
   const [repairResult, setRepairResult] = useState(null);
+  const [openBuySection, setOpenBuySection] = useState("equipment"); // Buy Gear accordion — one section open at a time
+  const toggleBuySection = (key) => setOpenBuySection(openBuySection === key ? null : key);
   const [resolverActivity, setResolverActivity] = useState("Pray");
   const resolvePanelRef = useRef(null);
   const jumpToResolver = (name) => {
@@ -8490,6 +8513,13 @@ function SettlementTab({ party, setParty, heroes, updateHero, addLog, goToGuilds
     });
     (h.backpack || []).forEach((item) => {
       if (item.name) {
+        // Backpack items store durability as a free-text "cur/max" string (unlike the
+        // structured {cur,max} weapons/armour use) — parse it the same way
+        // equipFromBackpack does, so a real Lost Dur. shows here instead of always 0.
+        const [curPart, maxPart] = String(item.dur || "").split("/");
+        const curDur = Number(curPart);
+        const maxDur = Number(maxPart);
+        const hasMax = maxPart !== undefined && !isNaN(maxDur) && maxDur > 0;
         sellableItems.push({
           key: `${h.id}:backpack:${item.id}`,
           label: `${h.name} — ${item.name}`,
@@ -8497,8 +8527,8 @@ function SettlementTab({ party, setParty, heroes, updateHero, addLog, goToGuilds
           kind: "backpack",
           itemId: item.id,
           defaultPrice: Number(item.value) || 0,
-          defaultLost: 0,
-          defaultMax: 6,
+          defaultLost: hasMax && !isNaN(curDur) ? Math.max(0, maxDur - curDur) : 0,
+          defaultMax: hasMax ? maxDur : 6,
         });
       }
     });
@@ -9841,6 +9871,46 @@ function SettlementTab({ party, setParty, heroes, updateHero, addLog, goToGuilds
         </div>
       </Panel>
 
+      <Panel className="mb-4">
+        <SectionTitle icon={ShoppingCart}>Buy Gear</SectionTitle>
+        <p className="text-xs mb-3" style={{ color: palette.inkSoft, fontFamily: "Crimson Pro, serif", fontStyle: "italic" }}>
+          Blacksmith (Weapons & Armour) and General Store / Magic Brewery (Equipment). Rolls Availability just like the Guild shops — 1d6 at or under the listed Avail means it's in stock. Cost is deducted and the item drops straight into the chosen hero's backpack at full Durability.
+        </p>
+        <CollapsibleShopSection label="Weapons (Blacksmith)" icon="⚔️" isOpen={openBuySection === "weapons"} onToggle={() => toggleBuySection("weapons")}>
+          <GuildShopList
+            items={BUYABLE_WEAPONS}
+            heroes={heroes}
+            party={party}
+            setParty={setParty}
+            updateHero={updateHero}
+            addLog={addLog}
+            sourceLabel="Blacksmith"
+          />
+        </CollapsibleShopSection>
+        <CollapsibleShopSection label="Armour & Shields (Blacksmith)" icon="🛡️" isOpen={openBuySection === "armour"} onToggle={() => toggleBuySection("armour")}>
+          <GuildShopList
+            items={BUYABLE_ARMOUR}
+            heroes={heroes}
+            party={party}
+            setParty={setParty}
+            updateHero={updateHero}
+            addLog={addLog}
+            sourceLabel="Blacksmith"
+          />
+        </CollapsibleShopSection>
+        <CollapsibleShopSection label="General Equipment (General Store / Magic Brewery)" icon="🎒" isOpen={openBuySection === "equipment"} onToggle={() => toggleBuySection("equipment")}>
+          <GuildShopList
+            items={GENERAL_EQUIPMENT}
+            heroes={heroes}
+            party={party}
+            setParty={setParty}
+            updateHero={updateHero}
+            addLog={addLog}
+            sourceLabel="General Store"
+          />
+        </CollapsibleShopSection>
+      </Panel>
+
       <div ref={resolvePanelRef}>
       <Panel className="mb-4">
         <SectionTitle icon={Sparkles}>Resolve an Activity</SectionTitle>
@@ -10134,10 +10204,33 @@ function SkillTrainingBox({ guildKey, skillKeys, heroes, party, setParty, update
 
 // Shared shop list — rolls 1d6 vs Availability, deducts coins, adds the item to the
 // chosen hero's backpack on success. Used by every guild's "Buying Special Equipment".
+// Collapsible wrapper for a single Buy Gear shop section (Weapons/Armour/Equipment) —
+// same "one section open at a time, chevron rotates" accordion pattern the Guilds tab
+// uses, so Buy Gear doesn't turn into one huge scroll on mobile.
+function CollapsibleShopSection({ label, icon, isOpen, onToggle, children }) {
+  return (
+    <div className="rounded mb-2 overflow-hidden" style={{ background: "#00000008" }}>
+      <button onClick={onToggle} className="w-full flex items-center justify-between px-3 py-2.5">
+        <span className="text-xs font-bold flex items-center gap-1.5" style={{ fontFamily: "Cinzel, serif", color: palette.ink }}>
+          {icon} {label}
+        </span>
+        <span style={{ color: palette.gold, transform: isOpen ? "rotate(90deg)" : "none", display: "inline-block" }}>›</span>
+      </button>
+      {isOpen && <div className="px-3 pb-3">{children}</div>}
+    </div>
+  );
+}
+
 function GuildShopList({ title, desc, items, heroes, party, setParty, updateHero, addLog, sourceLabel }) {
   const [hero, setHero] = useState(heroes[0]?.id || "");
   const [paySource, setPaySource] = useState(heroes[0]?.id || "party");
   const [result, setResult] = useState(null);
+  // Category chip filter — auto-enabled whenever the item list carries a `category`
+  // field (currently only General Equipment); guild equipment lists have no such
+  // field, so they render exactly as before with no filter row.
+  const categories = [...new Set(items.map((i) => i.category).filter(Boolean))];
+  const [activeCat, setActiveCat] = useState("All");
+  const shownItems = categories.length > 0 && activeCat !== "All" ? items.filter((i) => i.category === activeCat) : items;
 
   const buy = (item) => {
     const h = heroes.find((x) => x.id === hero);
@@ -10170,18 +10263,36 @@ function GuildShopList({ title, desc, items, heroes, party, setParty, updateHero
 
   return (
     <div className="subsection mb-4">
-      <p className="text-[11px] font-bold mb-1.5" style={{ fontFamily: "Cinzel, serif", color: palette.ink }}>{title}</p>
+      {title && <p className="text-[11px] font-bold mb-1.5" style={{ fontFamily: "Cinzel, serif", color: palette.ink }}>{title}</p>}
       {desc && <p className="text-[10px] mb-2 italic" style={{ color: palette.inkSoft }}>{desc}</p>}
       <select value={hero} onChange={(e) => { setHero(e.target.value); setPaySource(e.target.value || "party"); setResult(null); }} className="w-full text-xs rounded px-2 py-1.5 mb-2" style={{ background: "#fff", border: `1px solid ${palette.line}` }}>
         <option value="">Choose a hero…</option>
         {heroes.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
       </select>
       <PayFromSelect value={paySource} onChange={setPaySource} party={party} heroes={heroes} />
-      {items.map((item) => (
+      {categories.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {["All", ...categories].map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setActiveCat(cat)}
+              className="text-[10.5px] font-bold px-2.5 py-1 rounded-full"
+              style={{
+                background: activeCat === cat ? palette.crimson : "#fff",
+                color: activeCat === cat ? palette.parchment : palette.inkSoft,
+                border: `1px solid ${activeCat === cat ? palette.crimson : palette.line}`,
+              }}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+      )}
+      {shownItems.map((item) => (
         <GuildRow
           key={item.name}
           label={item.name}
-          sub={`Avail ${item.avail} · ${item.cost}c${item.special ? ` · ${item.special}` : ""}`}
+          sub={`Avail ${item.avail} · ${item.cost}c${item.category ? ` · ${item.category}` : ""}${item.special ? ` · ${item.special}` : ""}`}
           right="Roll & Buy"
           disabled={!hero}
           onClick={() => buy(item)}
@@ -16044,6 +16155,13 @@ export default function App() {
     ["campaigns", "Campaigns", FolderOpen],
   ];
 
+  // Combined, grouped list for the desktop sidebar nav — same tab keys/icons as the two
+  // mobile tab rows, just laid out vertically with group labels instead of horizontally.
+  const sidebarGroups = [
+    { label: "Core Loop", items: tabs },
+    { label: "World & Campaign", items: tabs2 },
+  ];
+
   return (
     <div style={{ minHeight: "100vh", background: palette.parchment, fontFamily: "Crimson Pro, serif" }}>
       <style>{fontImport}</style>
@@ -16053,7 +16171,9 @@ export default function App() {
       <InstallBanner />
       <BackToTop />
 
-      <header style={{ background: palette.charcoal, borderBottom: `4px solid ${palette.crimson}` }} className="px-4 py-4">
+      <div className="lg:flex">
+      {/* ===== Mobile/tablet header + tab rows (<1024px) — unchanged ===== */}
+      <header style={{ background: palette.charcoal, borderBottom: `4px solid ${palette.crimson}` }} className="px-4 py-4 lg:hidden">
         <div className="max-w-2xl mx-auto flex items-center justify-between">
           <div>
             <h1 style={{ fontFamily: "Cinzel, serif", color: palette.goldSoft, letterSpacing: "0.04em" }} className="text-xl font-bold">
@@ -16083,7 +16203,7 @@ export default function App() {
 
       <nav
         ref={navRef}
-        className="max-w-2xl mx-auto flex gap-2 px-4 pt-3 pb-1.5 overflow-x-auto scroll-hide"
+        className="lg:hidden max-w-2xl mx-auto flex gap-2 px-4 pt-3 pb-1.5 overflow-x-auto scroll-hide"
         style={{ scrollSnapType: "x proximity", cursor: "grab" }}
         onMouseDown={onNavPointerDown}
         onMouseMove={onNavPointerMove}
@@ -16117,7 +16237,7 @@ export default function App() {
       </nav>
       <nav
         ref={navRef2}
-        className="max-w-2xl mx-auto flex gap-2 px-4 pt-1.5 pb-2 overflow-x-auto scroll-hide"
+        className="lg:hidden max-w-2xl mx-auto flex gap-2 px-4 pt-1.5 pb-2 overflow-x-auto scroll-hide"
         style={{ scrollSnapType: "x proximity", cursor: "grab" }}
         onMouseDown={onNav2PointerDown}
         onMouseMove={onNav2PointerMove}
@@ -16143,7 +16263,76 @@ export default function App() {
         ))}
       </nav>
 
-      <main ref={mainContentRef} className="max-w-2xl mx-auto px-4 pb-16 pt-2">
+      {/* ===== Desktop left sidebar (1024px+) — replaces the header + both tab rows above,
+          which stay in the DOM but are hidden via lg:hidden rather than conditionally
+          rendered, so no state/behavior differs between breakpoints. ===== */}
+      <aside
+        className="hidden lg:flex lg:flex-col lg:sticky lg:top-0 lg:h-screen lg:w-64 lg:shrink-0 lg:overflow-y-auto lg:px-3.5 lg:py-5 lg:gap-4"
+        style={{ background: palette.charcoal, borderRight: `4px solid ${palette.crimson}` }}
+      >
+        <div>
+          <h1 style={{ fontFamily: "Cinzel, serif", color: palette.goldSoft, letterSpacing: "0.03em" }} className="text-base font-bold leading-tight">
+            LEAGUE OF DUNGEONEERS
+          </h1>
+          <p style={{ color: "#B8A78A", fontFamily: "Crimson Pro, serif" }} className="text-xs italic mt-1">
+            {campaigns.find((c) => c.id === campaignId)?.name || "Companion & Ledger"}
+          </p>
+          <span
+            className="inline-block mt-1.5 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded-full"
+            style={{ background: "rgba(212,175,110,0.15)", color: palette.goldSoft, border: `1px solid ${palette.goldSoft}`, fontFamily: "JetBrains Mono, monospace", letterSpacing: "0.03em" }}
+            title="This app is built against Core Rulebook v2.4 and QRS v2.24"
+          >
+            Rulebook v2.4 · QRS v2.24
+          </span>
+        </div>
+
+        <span
+          className="flex items-center gap-1 text-xs"
+          style={{ color: "#B8A78A", fontFamily: "JetBrains Mono, monospace", fontVariant: "small-caps", letterSpacing: "0.02em" }}
+        >
+          {saveState === "saving" && "saving…"}
+          {saveState === "saved" && (<><span>saved</span> <Check size={12} /></>)}
+          {saveState === "error" && "save failed"}
+        </span>
+
+        <nav className="flex flex-col gap-1">
+          {sidebarGroups.map((group) => (
+            <div key={group.label}>
+              <div
+                className="text-[9px] uppercase font-bold mt-2.5 mb-1 ml-2"
+                style={{ color: "#8a7a63", fontFamily: "JetBrains Mono, monospace", letterSpacing: "0.08em" }}
+              >
+                {group.label}
+              </div>
+              {group.items.map(([key, label, Icon]) => (
+                <button
+                  key={key}
+                  onClick={() => setTab(key)}
+                  className="relative w-full flex items-center gap-2.5 px-2.5 py-2 rounded text-sm font-semibold text-left"
+                  style={{
+                    background: tab === key ? palette.crimson : "transparent",
+                    color: tab === key ? palette.parchment : "#c9bda3",
+                    fontFamily: "Cinzel, serif",
+                    border: `1px solid ${tab === key ? palette.crimsonDark : "transparent"}`,
+                  }}
+                >
+                  <Icon size={15} className="shrink-0" /> {label}
+                  {key === "heroes" && heroes.some((h) => h.improvementPoints > 0) && (
+                    <span
+                      className="absolute top-1.5 right-2 rounded-full"
+                      style={{ width: 8, height: 8, background: palette.gold, border: `1.5px solid ${palette.charcoal}` }}
+                      title="A hero has Improvement Points to spend"
+                    />
+                  )}
+                </button>
+              ))}
+            </div>
+          ))}
+        </nav>
+      </aside>
+
+      <main ref={mainContentRef} className="max-w-2xl mx-auto px-4 pb-16 pt-2 lg:flex-1 lg:max-w-none lg:px-10 lg:py-8">
+      <div className="lg:max-w-2xl lg:mx-auto">
         <SectionSubNav containerRef={mainContentRef} tabKey={tab} />
         {tab === "party" && <PartyPanel party={party} setParty={setParty} log={log} addLog={addLog} heroes={heroes} updateHero={updateHero} pushToast={pushToast} />}
         {tab === "turn" && <TurnTab party={party} setParty={setParty} heroes={heroes} updateHero={updateHero} addLog={addLog} />}
@@ -16181,7 +16370,9 @@ export default function App() {
           />
         )}
         {tab === "reference" && <Reference />}
+      </div>
       </main>
+      </div>
       <Footer />
     </div>
   );

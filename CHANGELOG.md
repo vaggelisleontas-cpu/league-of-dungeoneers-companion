@@ -3,6 +3,15 @@
 All notable changes to this project are documented here, following
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) conventions.
 
+## [1.53.0] — 2026-08-23
+
+### Added
+- Buy Gear panel on the Settlement tab, right below Sell & Repair — Weapons and Armour & Shields (Blacksmith) and General Equipment (General Store / Magic Brewery), using the same "roll 1d6 vs Availability, deduct cost, drop into the chosen hero's backpack" mechanic the Guild shops already use. All three are collapsible accordion sections (only one open at a time, matching the Guilds tab's pattern) so the panel doesn't turn into one long scroll on mobile. General Equipment also gets category filter chips (Alchemy, Consumables, Jewellery, Light, Misc, Tools) since it's ~35 items across 6 categories
+- Desktop left sidebar (1024px+): the header and both scrolling tab rows collapse into a sticky sidebar with all 16 tabs grouped under "Core Loop" and "World & Campaign", freeing up the wide empty margins a centered mobile-first layout leaves on a desktop screen. Mobile/tablet layout below 1024px is completely unchanged — same header, same two tab rows, same behavior
+
+### Fixed
+- Sell & Repair: selling a named backpack item (as opposed to an equipped weapon or worn armour) always showed 0 Lost Durability regardless of its actual condition, since backpack items store durability as a free-text "cur/max" string rather than the structured field weapons/armour use, and the Sell panel wasn't parsing it. Now parses the same way the rest of the app already does, so a Longsword at 2/6 correctly shows 4 Lost Durability and the right sell value
+
 ## [1.52.1] — 2026-08-22
 
 ### Fixed
