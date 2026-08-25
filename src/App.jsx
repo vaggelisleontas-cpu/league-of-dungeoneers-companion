@@ -486,6 +486,8 @@ const defaultParty = () => ({
   coinsMigrated: true, // marks that this party has already gone through the one-time party-pot -> per-hero coins split (new parties don't need it)
   settlementName: "",
   dungeonState: "settlement", // "settlement" | "travel" | "dungeon" — drives the Travel tab status badge and the auto-clear of tempEffects on dungeon exit
+  dungeonRestCount: 0, // completed (uninterrupted) Short Rests taken since entering the current dungeon — drives the Ambush risk escalation; resets to 0 on Exit Dungeon, never per level
+  dungeonTheme: null, // last-used Encounter Table category for this dungeon's Ambush rolls — set on first use, editable each time
   settlementAP: {}, // heroId -> { spent: number, log: [{label, cost}] }
   innCostPerNight: 25,
   startingMorale: 0,
@@ -3741,6 +3743,19 @@ function BuyMeACoffeeButton() {
 
 // ---------- Changelog ----------
 const CHANGELOG_DATA = [
+  {
+    version: "1.55.0",
+    date: "2026-08-25",
+    sections: {
+      "Changed": [
+        "Short Rest fully rewritten to match the current rulebook (physical book, matching QRS v2.25 — confirmed superseding the older PDF, and confirmed directly by the game designer). Threat Level is no longer touched by Short Rest at all. The rest now works as: −1 food ration (always) → a manual toggle for whether a Wandering Monster on the board spotted the party during its 3 moves (the app doesn't track board position, so this stays a player call) → if interrupted, the rest stops there and battle begins; if not, Party Morale +2, HP +1d6/hero, Energy regen (or full with a Bed Roll), and full Mana for casters are applied",
+        "A rest counter now tracks completed Short Rests taken since entering the current dungeon, resetting only on Exit Dungeon (not per dungeon level) — this drives the new Ambush mechanic below",
+      ],
+      "Added": [
+        "Ambush roll after every uninterrupted Short Rest: risk = 5% + current Threat Level, +10% for each rest after the first this dungeon (capped at 70% total). A \"Door barred\" toggle lets you flag if the party used iron wedges or Seal Door beforehand. Rolling 1d100 against that risk resolves the Ambush automatically — rolling on the Encounter Table (defaulting to the dungeon's last-used monster category, editable), noting enemy placement outside the entry door, randomizing which hero starts awake and ready, and applying the correct prone/initiative-token outcome depending on whether the door was barred",
+      ],
+    },
+  },
   {
     version: "1.54.1",
     date: "2026-08-25",
@@ -11997,7 +12012,7 @@ function BehaviourWalker() {
   );
 }
 
-function TurnTab({ party, setParty, heroes, updateHero, addLog }) {
+function TurnTab({ party, setParty, heroes, updateHero, addLog, pushToast }) {
   // Start of Turn resolver (moved here from the Party tab — it's step 1 of the Turn
   // Sequence, not persistent party state).
   const [inBattle, setInBattle] = useState(false);
@@ -12100,33 +12115,46 @@ function TurnTab({ party, setParty, heroes, updateHero, addLog }) {
     setTradeItem("");
   };
 
-  // In-Dungeon Short Rest — automates every numeric step from REST_STEPS (Reference tab).
-  // Board-state steps (arranging heroes, moving Wandering Monsters, barring the door,
-  // brewing potions, rolling for Ambush — no data for that roll) stay manual reminders.
+  // In-Dungeon Short Rest — rewritten 2026-08-23 per Michael's direct confirmation that the
+  // physical rulebook (matching QRS v2.25) supersedes the old PDF's Threat-roll-based REST.
+  // New sequence: -1 food (always) -> if a Wandering Monster on the board spots the party
+  // during its 3 moves, rest is INTERRUPTED (battle starts, nothing else happens) -> if not
+  // interrupted: PM +2, +1d6 HP/hero, Energy regen, full Mana, THEN a separate 1d100 Ambush
+  // roll (risk = 5 + Threat%, +10%/rest after the 1st this dungeon, capped at 70% total).
+  // Threat Level itself is never touched by Short Rest anymore.
+  // Board state (is a Wandering Monster even present, did it get LOS) isn't tracked by this
+  // app, so that determination is a manual toggle the player sets from what happened at the
+  // table -- not a fabricated probability.
+  // TODO(rest-count): pending Michael confirmation on whether an INTERRUPTED rest still
+  // counts toward the +10%/rest Ambush escalation. Currently only completed (uninterrupted)
+  // rests increment dungeonRestCount -- revisit if the answer comes back differently.
   const [restSummary, setRestSummary] = useState(null);
+  const [wmSpotted, setWmSpotted] = useState(false);
+  const [doorBarred, setDoorBarred] = useState(false);
+  const [ambushRisk, setAmbushRisk] = useState(null); // { pct, restNumber, doorBarred }
+  const [ambushResult, setAmbushResult] = useState(null);
+  const [ambushCategory, setAmbushCategory] = useState(party.dungeonTheme || Object.keys(ENCOUNTER_TABLES)[0]);
+
   const takeShortRest = () => {
     const lines = [];
     const newFood = Math.max(0, party.food - 1);
-    lines.push(`Food: −1 ration (now ${newFood}).${newFood === 0 ? " Party is out of food!" : ""}`);
+    lines.push({ text: `Food: −1 ration (now ${newFood}).${newFood === 0 ? " Party is out of food!" : ""}`, warn: newFood === 0 });
 
-    const lowered = clamp(party.threat - 5, party.threatFloor, 999);
-    const threatRoll = rollDie(20);
-    let newThreat = lowered;
-    if (threatRoll === 20) {
-      newThreat = clamp(lowered - 5, party.threatFloor, 999);
-      lines.push(`Threat −5 (now ${lowered}), then a natural 20 on the follow-up roll — Threat −5 again (now ${newThreat}).`);
-    } else if (threatRoll > lowered) {
-      newThreat = clamp(lowered + 1, party.threatFloor, 999);
-      lines.push(`Threat −5 (now ${lowered}), then rolled ${threatRoll} (above ${lowered}) — Threat +1 (now ${newThreat}).`);
-    } else {
-      const tableRoll = rollDie(20);
-      const entry = findThreatEntry(THREAT_TABLE_NOT_IN_BATTLE, tableRoll);
-      newThreat = clamp(lowered + entry.decrease, party.threatFloor, 999);
-      lines.push(`Threat −5 (now ${lowered}), then rolled ${threatRoll} (at/below ${lowered}) — ${entry.title}: ${entry.text} Threat ${entry.decrease} (now ${newThreat}).`);
+    setAmbushResult(null);
+
+    if (wmSpotted) {
+      lines.push({ text: `Rest interrupted! A Wandering Monster spotted the party during its moves — Party Morale, HP, Energy, and Mana recovery are skipped. Roll initiative — battle starts now.`, warn: true });
+      pushToast && pushToast("Rest Interrupted", "A Wandering Monster spotted the party — Morale, HP, Energy, and Mana recovery are skipped. Roll initiative and begin battle.");
+      setParty((prev) => ({ ...prev, food: newFood }));
+      setAmbushRisk(null);
+      setRestSummary(lines);
+      addLog(`Short Rest (interrupted): ${lines.map((l) => l.text).join(" ")}`);
+      setWmSpotted(false);
+      return;
     }
 
     const newMorale = party.morale + 2;
-    lines.push(`Party Morale +2 (now ${newMorale}).`);
+    lines.push({ text: `Party Morale +2 (now ${newMorale}).` });
 
     heroes.forEach((h) => {
       const hpRoll = rollDie(6);
@@ -12151,12 +12179,44 @@ function TurnTab({ party, setParty, heroes, updateHero, addLog }) {
         energy: { ...h.energy, cur: newEnergyCur },
         mana: isCaster ? { ...h.mana, cur: h.mana.max } : h.mana,
       });
-      lines.push(`${h.name}: +${hpRoll} HP (${newHp}/${h.hp.max}). ${energyLine}${isCaster ? " Mana fully regained." : ""}`);
+      lines.push({ text: `${h.name}: +${hpRoll} HP (${newHp}/${h.hp.max}). ${energyLine}${isCaster ? " Mana fully regained." : ""}` });
     });
 
-    setParty((prev) => ({ ...prev, food: newFood, threat: newThreat, morale: newMorale }));
+    const restNumber = (party.dungeonRestCount || 0) + 1;
+    const riskPct = Math.min(70, 5 + party.threat + 10 * (restNumber - 1));
+    lines.push({ text: `Rest #${restNumber} this dungeon — Ambush risk ${riskPct}%. Roll for Ambush below.` });
+
+    setParty((prev) => ({ ...prev, food: newFood, morale: newMorale, dungeonRestCount: restNumber }));
     setRestSummary(lines);
-    addLog(`Short Rest: ${lines.join(" ")}`);
+    setAmbushRisk({ pct: riskPct, restNumber, doorBarred });
+    addLog(`Short Rest: ${lines.map((l) => l.text).join(" ")}`);
+    setWmSpotted(false);
+    setDoorBarred(false);
+  };
+
+  const rollAmbush = () => {
+    if (!ambushRisk) return;
+    const roll = rollPercent();
+    const ambushed = roll <= ambushRisk.pct;
+    if (!ambushed) {
+      setAmbushResult({ ambushed: false, roll });
+      addLog(`Ambush roll: ${roll} vs ${ambushRisk.pct}% — no ambush.`);
+      return;
+    }
+    const highestLevel = heroes.length ? Math.max(...heroes.map((h) => h.level || 1)) : 1;
+    const levelBonus = (highestLevel - 1) * 10;
+    const d20 = rollDie(20);
+    const total = d20 + levelBonus;
+    const table = ENCOUNTER_TABLES[ambushCategory];
+    const row = findEncounterRow(table, Math.min(total, 110));
+    const rolled = row
+      ? row.entries.map((e) => ({ ...e, count: rollEncounterNumber(e.number), stats: findMonsterStatsForEncounter(e.name) }))
+      : null;
+    const awakeHero = heroes.length ? heroes[Math.floor(Math.random() * heroes.length)] : null;
+    const res = { ambushed: true, roll, d20, total, category: ambushCategory, row, rolled, awakeHero, doorBarred: ambushRisk.doorBarred };
+    setAmbushResult(res);
+    const summary = rolled ? rolled.map((e) => `${e.count}x ${e.name}`).join(", ") : "not yet transcribed into the app";
+    addLog(`Ambush roll: ${roll} vs ${ambushRisk.pct}% — AMBUSHED. Encounter (${ambushCategory}): ${summary}. Awake hero: ${awakeHero ? awakeHero.name : "none"}. Door barred: ${ambushRisk.doorBarred ? "yes" : "no"}.`);
   };
 
   const resetRound = () => {
@@ -12462,8 +12522,53 @@ function TurnTab({ party, setParty, heroes, updateHero, addLog }) {
       <Panel className="mb-4">
         <SectionTitle icon={Bed}>Short Rest</SectionTitle>
         <p className="text-xs mb-2" style={{ color: palette.inkSoft, fontFamily: "Crimson Pro, serif", fontStyle: "italic" }}>
-          Automates the numeric steps: −1 food, Threat −5 then a follow-up roll, Party Morale +2, +1d6 HP per hero, Energy regen (or full with a Bed Roll), full Mana for casters. Arranging heroes, barring the door, moving Wandering Monsters, brewing potions, and the Ambush roll still need doing by hand — see the full checklist in Reference.
+          Automates: −1 food, PM +2, +1d6 HP/hero, Energy regen (or full with a Bed Roll), full Mana for casters — all skipped if interrupted — plus the Ambush roll. Arranging heroes, barring the door, and moving Wandering Monsters still happen at the table.
         </p>
+        {(party.dungeonRestCount || 0) > 0 && (
+          <div
+            className="inline-block text-xs font-bold px-2 py-1 rounded-full mb-2"
+            style={{ background: palette.goldSoft, color: palette.charcoal, fontFamily: "JetBrains Mono, monospace" }}
+          >
+            Rest #{(party.dungeonRestCount || 0) + 1} this dungeon — next Ambush risk {Math.min(70, 5 + party.threat + 10 * (party.dungeonRestCount || 0))}%
+          </div>
+        )}
+
+        <button
+          onClick={() => setWmSpotted((v) => !v)}
+          className="w-full flex items-center justify-between text-left mb-2 rounded p-2"
+          style={{ background: "#fff", border: `1px solid ${wmSpotted ? palette.crimson : palette.line}` }}
+        >
+          <span className="text-xs pr-2" style={{ color: palette.ink, fontFamily: "Crimson Pro, serif" }}>
+            <b style={{ fontFamily: "Cinzel, serif" }}>Wandering Monster spotted the party</b>
+            <br />
+            <span style={{ color: palette.inkSoft, fontSize: 10.5 }}>Toggle on if a WM on the board saw you during its 3 moves</span>
+          </span>
+          <span
+            className="shrink-0 rounded-full"
+            style={{ width: 36, height: 20, background: wmSpotted ? palette.crimson : "#ccc", position: "relative", transition: "background .15s" }}
+          >
+            <span style={{ position: "absolute", top: 2, left: wmSpotted ? 18 : 2, width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "left .15s" }} />
+          </span>
+        </button>
+
+        <button
+          onClick={() => setDoorBarred((v) => !v)}
+          className="w-full flex items-center justify-between text-left mb-3 rounded p-2"
+          style={{ background: "#fff", border: `1px solid ${doorBarred ? palette.crimson : palette.line}` }}
+        >
+          <span className="text-xs pr-2" style={{ color: palette.ink, fontFamily: "Crimson Pro, serif" }}>
+            <b style={{ fontFamily: "Cinzel, serif" }}>Door barred (iron wedges / Seal Door)</b>
+            <br />
+            <span style={{ color: palette.inkSoft, fontSize: 10.5 }}>Changes how an Ambush plays out, if one occurs</span>
+          </span>
+          <span
+            className="shrink-0 rounded-full"
+            style={{ width: 36, height: 20, background: doorBarred ? palette.crimson : "#ccc", position: "relative", transition: "background .15s" }}
+          >
+            <span style={{ position: "absolute", top: 2, left: doorBarred ? 18 : 2, width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "left .15s" }} />
+          </span>
+        </button>
+
         <button
           onClick={takeShortRest}
           className="w-full mb-2 text-sm px-3 py-2 rounded font-bold active:scale-95 transition-transform"
@@ -12474,8 +12579,81 @@ function TurnTab({ party, setParty, heroes, updateHero, addLog }) {
         {restSummary && (
           <div className="rounded p-2" style={{ background: "#00000010" }}>
             {restSummary.map((line, i) => (
-              <p key={i} className="text-xs" style={{ color: palette.ink, fontFamily: "Crimson Pro, serif" }}>{line}</p>
+              <p
+                key={i}
+                className={`text-xs ${line.warn ? "font-bold" : ""}`}
+                style={{ color: line.warn ? palette.crimson : palette.ink, fontFamily: "Crimson Pro, serif" }}
+              >
+                {line.warn && "⚠ "}{line.text}
+              </p>
             ))}
+          </div>
+        )}
+
+        {ambushRisk && (
+          <div className="mt-3 rounded p-2" style={{ background: "#fff", border: `1px solid ${palette.line}` }}>
+            <div style={{ fontFamily: "Cinzel, serif", fontWeight: 700, fontSize: 12, color: palette.crimsonDark, marginBottom: 4 }}>
+              Ambush Roll — Risk {ambushRisk.pct}%
+            </div>
+            <div className="rounded-full overflow-hidden mb-2" style={{ background: "#00000015", height: 8 }}>
+              <div style={{ width: `${ambushRisk.pct}%`, height: "100%", background: palette.ember, borderRadius: 999 }} />
+            </div>
+            <p className="text-xs mb-1.5" style={{ color: palette.inkSoft, fontFamily: "Crimson Pro, serif" }}>
+              Monster category (defaults to dungeon theme, tap to change):
+            </p>
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {Object.keys(ENCOUNTER_TABLES).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => { setAmbushCategory(f); setParty((prev) => ({ ...prev, dungeonTheme: f })); }}
+                  className="text-xs px-2 py-1 rounded-full"
+                  style={{ background: ambushCategory === f ? palette.crimson : "#00000010", color: ambushCategory === f ? palette.parchment : palette.ink }}
+                >
+                  {f}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={rollAmbush}
+              className="w-full flex items-center justify-center gap-2 py-2 rounded font-bold text-sm"
+              style={{ background: palette.crimsonDark, color: palette.parchment, fontFamily: "Cinzel, serif" }}
+            >
+              <Dice5 size={14} /> Roll 1d100 for Ambush
+            </button>
+
+            {ambushResult && !ambushResult.ambushed && (
+              <div className="mt-2 text-xs" style={{ color: palette.forestDark, fontFamily: "Crimson Pro, serif" }}>
+                Rolled {ambushResult.roll} vs {ambushRisk.pct}% — no ambush this rest.
+              </div>
+            )}
+            {ambushResult && ambushResult.ambushed && (
+              <div className="mt-2 rounded p-2 space-y-1.5" style={{ background: palette.charcoal, color: palette.parchment }}>
+                <div className="text-xs font-bold" style={{ color: palette.goldSoft, fontFamily: "Cinzel, serif" }}>
+                  ⚔ Ambushed! (rolled {ambushResult.roll}, under {ambushRisk.pct}%)
+                </div>
+                {!ambushResult.rolled && (
+                  <p className="text-xs italic">Not yet transcribed into the app — that part of the {ambushResult.category} table wasn't in the source photos.</p>
+                )}
+                {ambushResult.rolled && ambushResult.rolled.map((e, i) => (
+                  <div key={i} className="rounded p-1.5" style={{ background: "#00000025" }}>
+                    <div className="font-bold text-xs">{e.count}x {e.name}</div>
+                    {e.stats && (
+                      <div className="text-xs" style={{ color: palette.goldSoft, fontFamily: "JetBrains Mono, monospace" }}>
+                        CS {e.stats.cs} · RS {e.stats.rs} · HP {e.stats.hp} · DMG {e.stats.dmg} · NA {Number(e.stats.na) + Number(e.armour || 0)}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                <p className="text-xs">Enemies placed just outside the door the party entered through.</p>
+                <p className="text-xs">Randomized awake hero: <b>{ambushResult.awakeHero ? ambushResult.awakeHero.name : "—"}</b> (starts standing, ready).</p>
+                {ambushResult.doorBarred ? (
+                  <p className="text-xs">Door was barred — all heroes start standing, enemies get only normal initiative tokens.</p>
+                ) : (
+                  <p className="text-xs">Door was not barred — other heroes start <b>prone</b>, enemies get <b>+3 initiative tokens</b>.</p>
+                )}
+                <p className="text-xs italic" style={{ color: "#ccc" }}>Set up the board and roll initiative in the Turn tab to continue.</p>
+              </div>
+            )}
           </div>
         )}
       </Panel>
@@ -15226,6 +15404,7 @@ function TravelTab({ party, setParty, heroes, addLog, updateHero }) {
       }
     });
     setDungeonState("travel");
+    setParty((prev) => ({ ...prev, dungeonRestCount: 0 }));
     setShowExitConfirm(false);
     const line = clearedCount > 0
       ? `Exited dungeon — cleared ${clearedCount} temporary effect${clearedCount === 1 ? "" : "s"} across ${heroesAffected} hero${heroesAffected === 1 ? "" : "es"}.`
@@ -16505,7 +16684,7 @@ export default function App() {
       <div className="lg:max-w-2xl lg:mx-auto">
         <SectionSubNav containerRef={mainContentRef} tabKey={tab} />
         {tab === "party" && <PartyPanel party={party} setParty={setParty} log={log} addLog={addLog} heroes={heroes} updateHero={updateHero} pushToast={pushToast} />}
-        {tab === "turn" && <TurnTab party={party} setParty={setParty} heroes={heroes} updateHero={updateHero} addLog={addLog} />}
+        {tab === "turn" && <TurnTab party={party} setParty={setParty} heroes={heroes} updateHero={updateHero} addLog={addLog} pushToast={pushToast} />}
         {tab === "travel" && (
           <TravelTab party={party} setParty={setParty} heroes={heroes} updateHero={updateHero} addLog={addLog} />
         )}

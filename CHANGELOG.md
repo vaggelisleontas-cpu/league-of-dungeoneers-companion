@@ -3,6 +3,15 @@
 All notable changes to this project are documented here, following
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) conventions.
 
+## [1.55.0] — 2026-08-25
+
+### Changed
+- Short Rest fully rewritten to match the current rulebook (physical book, matching QRS v2.25 — confirmed superseding the older PDF, and confirmed directly by the game designer). Threat Level is no longer touched by Short Rest at all. The rest now works as: −1 food ration (always) → a manual toggle for whether a Wandering Monster on the board spotted the party during its 3 moves (the app doesn't track board position, so this stays a player call) → if interrupted, the rest stops there and battle begins; if not, Party Morale +2, HP +1d6/hero, Energy regen (or full with a Bed Roll), and full Mana for casters are applied
+- A rest counter now tracks completed Short Rests taken since entering the current dungeon, resetting only on Exit Dungeon (not per dungeon level) — this drives the new Ambush mechanic below
+
+### Added
+- Ambush roll after every uninterrupted Short Rest: risk = 5% + current Threat Level, +10% for each rest after the first this dungeon (capped at 70% total). A "Door barred" toggle lets you flag if the party used iron wedges or Seal Door beforehand. Rolling 1d100 against that risk resolves the Ambush automatically — rolling on the Encounter Table (defaulting to the dungeon's last-used monster category, editable), noting enemy placement outside the entry door, randomizing which hero starts awake and ready, and applying the correct prone/initiative-token outcome depending on whether the door was barred
+
 ## [1.54.1] — 2026-08-25
 
 ### Fixed
