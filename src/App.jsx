@@ -3742,6 +3742,15 @@ function BuyMeACoffeeButton() {
 // ---------- Changelog ----------
 const CHANGELOG_DATA = [
   {
+    version: "1.54.1",
+    date: "2026-08-25",
+    sections: {
+      "Fixed": [
+        "Desktop sidebar (1024px+) was overlapping the Footer and causing the page to scroll oddly. Root cause was the sidebar's height:100vh being miscalculated against the app's desktop zoom scale-up (zoom:1.2/1.35), rendering it taller than what's actually visible on screen. Switched the sidebar to position:fixed with inset-y-0 (no viewport-height value involved, so the zoom mismatch can't happen) and moved the Footer to sit directly after the main content so it's correctly offset instead of running full-width underneath the sidebar",
+      ],
+    },
+  },
+  {
     version: "1.54.0",
     date: "2026-08-23",
     sections: {
@@ -16320,7 +16329,7 @@ export default function App() {
       <InstallBanner />
       <BackToTop />
 
-      <div className="lg:flex">
+      <div>
       {/* ===== Mobile/tablet header + tab rows (<1024px) — unchanged ===== */}
       <header style={{ background: palette.charcoal, borderBottom: `4px solid ${palette.crimson}` }} className="px-4 py-4 lg:hidden">
         <div className="max-w-2xl mx-auto flex items-center justify-between">
@@ -16416,7 +16425,19 @@ export default function App() {
           which stay in the DOM but are hidden via lg:hidden rather than conditionally
           rendered, so no state/behavior differs between breakpoints. ===== */}
       <aside
-        className="hidden lg:flex lg:flex-col lg:sticky lg:top-0 lg:h-screen lg:w-64 lg:shrink-0 lg:overflow-y-auto lg:px-3.5 lg:py-5 lg:gap-4"
+        // position:fixed (not sticky), pinned to the app's own scroll root. This app
+        // scrolls via #root itself (see getScrollRoot() above — window.scrollY isn't
+        // used), not the browser window, and #root also runs under CSS `zoom` (the
+        // desktop scale-up in index.css). The earlier sticky+h-screen version used an
+        // explicit 100vh height, which zoom miscalculates against the real viewport,
+        // making the sidebar render taller than what's visible and overlap the Footer
+        // below it. `inset-y-0` needs no vh value at all — it just spans top:0 to
+        // bottom:0 of its containing block, whatever that resolves to — so the zoom
+        // mismatch can't happen, and since aside lives inside #root like everything
+        // else, it pins correctly against the same scroll root the rest of the app
+        // already uses. Taking it out of normal flow this way means `main` and
+        // `Footer` below both need an explicit lg:ml-64 to leave room for it.
+        className="hidden lg:flex lg:flex-col lg:fixed lg:inset-y-0 lg:left-0 lg:w-64 lg:overflow-y-auto lg:px-3.5 lg:py-5 lg:gap-4"
         style={{ background: palette.charcoal, borderRight: `4px solid ${palette.crimson}` }}
       >
         <div>
@@ -16480,7 +16501,7 @@ export default function App() {
         </nav>
       </aside>
 
-      <main ref={mainContentRef} className="max-w-2xl mx-auto px-4 pb-16 pt-2 lg:flex-1 lg:max-w-none lg:px-10 lg:py-8">
+      <main ref={mainContentRef} className="max-w-2xl mx-auto px-4 pb-16 pt-2 lg:max-w-none lg:ml-64 lg:px-10 lg:py-8">
       <div className="lg:max-w-2xl lg:mx-auto">
         <SectionSubNav containerRef={mainContentRef} tabKey={tab} />
         {tab === "party" && <PartyPanel party={party} setParty={setParty} log={log} addLog={addLog} heroes={heroes} updateHero={updateHero} pushToast={pushToast} />}
@@ -16521,8 +16542,10 @@ export default function App() {
         {tab === "reference" && <Reference />}
       </div>
       </main>
+      <div className="lg:ml-64">
+        <Footer />
       </div>
-      <Footer />
+      </div>
     </div>
   );
 }

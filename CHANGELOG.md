@@ -3,6 +3,11 @@
 All notable changes to this project are documented here, following
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) conventions.
 
+## [1.54.1] — 2026-08-25
+
+### Fixed
+- Desktop sidebar (1024px+) was overlapping the Footer and causing the page to scroll oddly. Root cause was the sidebar's `height: 100vh` being miscalculated against the app's desktop zoom scale-up (`zoom: 1.2`/`1.35` in index.css), rendering it taller than what's actually visible on screen. Switched the sidebar to `position: fixed` with `inset-y-0` (no viewport-height value involved, so the zoom mismatch can't happen) and moved the Footer to sit directly after the main content in the same layout container so it's correctly offset instead of running full-width underneath the sidebar
+
 ## [1.54.0] — 2026-08-23
 
 ### Added
