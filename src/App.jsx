@@ -76,7 +76,12 @@ const defaultHero = () => ({
     heal: 20, alchemy: 20, perception: 20, foraging: 20,
     arcaneArts: 0, battlePrayers: 0,
   },
+  // Tracks a natural 01-05 permanent +1 already claimed on a stat/skill (keyed by stat
+  // or skill key). Per the rulebook this is allowed "once between each settlement
+  // visit", so it clears when the party returns to a settlement — not per dungeon.
+  skillImprovementsUsed: {},
   weapon: { name: "", dmg: "", enc: 0, dur: { cur: 6, max: 6 } },
+  offhandWeapon: { name: "", dmg: "", enc: 0, dur: { cur: 6, max: 6 } }, // requires the Dual Wield talent
   armour: {
     head: { name: "", def: 0, enc: 0, dur: { cur: 0, max: 0 }, stacked: null },
     arms: { name: "", def: 0, enc: 0, dur: { cur: 0, max: 0 }, stacked: null },
@@ -3744,6 +3749,19 @@ function BuyMeACoffeeButton() {
 // ---------- Changelog ----------
 const CHANGELOG_DATA = [
   {
+    version: "1.56.0",
+    date: "2026-08-29",
+    sections: {
+      "Added": [
+        "01-05 improvement tracker: a small toggle next to every stat and skill marks the permanent +1 as already claimed, and clears automatically the next time the party arrives at a settlement — matching the rulebook's \"once between each settlement visits\" wording rather than resetting per dungeon",
+        "Offhand Weapon slot on the hero sheet, unlocked once a hero has the Dual Wield talent. Picking a Dual Wield-tagged weapon shows its DMG bonus and the +5 two-weapon parry bonus automatically; picking a non-Dual-Wield weapon flags that it can't be used offhand",
+      ],
+      "Changed": [
+        "Start of Turn now advances the round in the same action: rolling it resets every hero's AP to 2, counts down light sources, and rolls the Scenario die (and Threat, if triggered) in one tap — removing the separate \"Next Round\" step. The round counter moved up into the Start of Turn panel so it's still visible at a glance",
+      ],
+    },
+  },
+  {
     version: "1.55.0",
     date: "2026-08-25",
     sections: {
@@ -5694,9 +5712,11 @@ function normalizeHero(h) {
     // Luck used to be a bare number; migrate old saves to {cur,max} (old value becomes both).
     luck: typeof h.luck === "number" ? { cur: h.luck, max: h.luck } : { ...base.luck, ...(h.luck || {}) },
     skills: { ...base.skills, ...(h.skills || {}) },
+    skillImprovementsUsed: h.skillImprovementsUsed || {},
     ipSpentThisLevel: h.ipSpentThisLevel || {},
     creationPointsSpent: { ...base.creationPointsSpent, ...(h.creationPointsSpent || {}) },
     weapon: { ...base.weapon, ...(h.weapon || {}), dur: mergeDur(h.weapon && h.weapon.dur) },
+    offhandWeapon: { ...base.offhandWeapon, ...(h.offhandWeapon || {}), dur: mergeDur(h.offhandWeapon && h.offhandWeapon.dur) },
     talents: h.talents || base.talents,
     perks: h.perks || base.perks,
     spells: h.spells || base.spells,
@@ -6056,6 +6076,27 @@ function HeroCard({ hero, update, remove, addLog, pushToast, party, setParty, go
     const w = WEAPONS.find((x) => x.name === name);
     if (!w) return;
     update({ ...hero, weapon: { name: w.name, dmg: w.dmg, enc: w.enc, dur: { cur: 6, max: 6 } } });
+  };
+  // Offhand weapon — only usable once the hero has learned the Dual Wield talent.
+  const setOffhandWeapon = (patch) => update({ ...hero, offhandWeapon: { ...hero.offhandWeapon, ...patch } });
+  const pickOffhandWeapon = (name) => {
+    const w = WEAPONS.find((x) => x.name === name);
+    if (!w) return;
+    update({ ...hero, offhandWeapon: { name: w.name, dmg: w.dmg, enc: w.enc, dur: { cur: 6, max: 6 } } });
+  };
+  const clearOffhandWeapon = () => {
+    if (!hero.offhandWeapon.name) return;
+    const ref = WEAPONS.find((w) => w.name === hero.offhandWeapon.name);
+    const item = {
+      id: uid(),
+      name: hero.offhandWeapon.name,
+      value: ref ? ref.cost : "",
+      enc: hero.offhandWeapon.enc,
+      dur: `${hero.offhandWeapon.dur.cur}/${hero.offhandWeapon.dur.max}`,
+      slot: "backpack",
+    };
+    update({ ...hero, offhandWeapon: { name: "", dmg: "", enc: 0, dur: { cur: 6, max: 6 } }, backpack: [...hero.backpack, item] });
+    addLog && addLog(`${hero.name} unequips offhand ${item.name} — moved to the backpack.`);
   };
   const setArmourPiece = (loc, patch) => update({ ...hero, armour: { ...hero.armour, [loc]: { ...hero.armour[loc], ...patch } } });
   const toggleWeaponMithril = () => {
@@ -6596,6 +6637,13 @@ function HeroCard({ hero, update, remove, addLog, pushToast, party, setParty, go
   const weaponClassLimit = PROFESSION_WEAPON_CLASS_LIMIT[hero.profession];
   const weaponClassTooHeavy = weaponRef && weaponClassLimit ? weaponRef.class > weaponClassLimit : false;
   const armourTierLimit = PROFESSION_ARMOUR_TIER_LIMIT[hero.profession];
+  const hasDualWield = hero.talents.includes("Dual Wield");
+  const offhandWeaponRef = WEAPONS.find((w) => w.name === hero.offhandWeapon?.name);
+  // Pull the "Dual Wield +X" DMG bonus straight off the weapon's own Special tag, so it
+  // stays correct if new dual-wieldable weapons get added later without extra wiring.
+  const dualWieldBonusMatch = offhandWeaponRef?.special?.match(/Dual Wield \+(\d+)/i);
+  const dualWieldDmgBonus = dualWieldBonusMatch ? Number(dualWieldBonusMatch[1]) : null;
+  const offhandNotDualWieldable = offhandWeaponRef && dualWieldBonusMatch === null;
 
   const pickBackpackUpgrade = (newUpgrade) => {
     const oldPenalty = BACKPACK_UPGRADES[hero.backpackUpgrade || ""]?.dexPenalty || 0;
@@ -7258,6 +7306,17 @@ function HeroCard({ hero, update, remove, addLog, pushToast, party, setParty, go
                       max {max}
                     </div>
                   )}
+                  <button
+                    onClick={() => set({ skillImprovementsUsed: { ...hero.skillImprovementsUsed, [k]: !hero.skillImprovementsUsed?.[k] } })}
+                    className="mt-0.5 w-full text-[8px] px-1 py-0.5 rounded font-semibold"
+                    style={{
+                      background: hero.skillImprovementsUsed?.[k] ? palette.gold : "#00000010",
+                      color: hero.skillImprovementsUsed?.[k] ? palette.charcoal : palette.inkSoft,
+                    }}
+                    title="Rolled 01-05 and took the permanent +1 — allowed once between each settlement visit. Clears automatically when the party returns to a settlement."
+                  >
+                    {hero.skillImprovementsUsed?.[k] ? "✓ Improved" : "01-05 used?"}
+                  </button>
                   {isEncumbered && (
                     <div className="text-[10px] font-bold" style={{ fontFamily: "JetBrains Mono, monospace", color: palette.crimson }}>
                       eff {v - 10}
@@ -7494,6 +7553,17 @@ function HeroCard({ hero, update, remove, addLog, pushToast, party, setParty, go
                       eff {hero.skills[k] - 10}
                     </div>
                   )}
+                  <button
+                    onClick={() => set({ skillImprovementsUsed: { ...hero.skillImprovementsUsed, [k]: !hero.skillImprovementsUsed?.[k] } })}
+                    className="mt-0.5 w-full text-[8px] px-1 py-0.5 rounded font-semibold"
+                    style={{
+                      background: hero.skillImprovementsUsed?.[k] ? palette.gold : "#00000010",
+                      color: hero.skillImprovementsUsed?.[k] ? palette.charcoal : palette.inkSoft,
+                    }}
+                    title="Rolled 01-05 and took the permanent +1 — allowed once between each settlement visit. Clears automatically when the party returns to a settlement."
+                  >
+                    {hero.skillImprovementsUsed?.[k] ? "✓ Improved" : "01-05 used?"}
+                  </button>
                 </div>
               );
             })}
@@ -7604,6 +7674,96 @@ function HeroCard({ hero, update, remove, addLog, pushToast, party, setParty, go
               </div>
             )}
           </div>
+
+          {/* Offhand Weapon — Dual Wield talent gated */}
+          {hasDualWield && (
+            <div className="mb-2">
+              <div className="flex items-center justify-between mb-1">
+                <div style={{ fontFamily: "Cinzel, serif", fontSize: 10, color: palette.inkSoft }} className="uppercase">Offhand Weapon</div>
+                {hero.offhandWeapon.name && (
+                  <button
+                    onClick={clearOffhandWeapon}
+                    className="text-[10px] flex items-center gap-0.5 px-1.5 py-0.5 rounded"
+                    style={{ color: palette.crimson, fontFamily: "Crimson Pro, serif" }}
+                  >
+                    <X size={11} /> Clear
+                  </button>
+                )}
+              </div>
+              <select
+                value=""
+                onChange={(e) => e.target.value && pickOffhandWeapon(e.target.value)}
+                className="w-full text-xs rounded px-2 py-1.5 mb-1.5"
+                style={{ background: "#fff", border: `1px solid ${palette.line}`, fontFamily: "Crimson Pro, serif", color: palette.inkSoft }}
+              >
+                <option value="">Pick from table…</option>
+                {(() => {
+                  const ownedNames = new Set((hero.backpack || []).map((b) => b.name));
+                  const owned = WEAPONS.filter((w) => ownedNames.has(w.name));
+                  return (
+                    <>
+                      {owned.length > 0 && (
+                        <optgroup label="In Your Backpack">
+                          {owned.map((w) => (
+                            <option key={`ob-${w.name}`} value={w.name}>{w.name} ({w.dmg}, Class {w.class})</option>
+                          ))}
+                        </optgroup>
+                      )}
+                      <optgroup label="All Items (reference)">
+                        {WEAPONS.map((w) => (
+                          <option key={`o-${w.name}`} value={w.name}>{w.name} ({w.dmg}, Class {w.class})</option>
+                        ))}
+                      </optgroup>
+                    </>
+                  );
+                })()}
+              </select>
+              <input
+                value={hero.offhandWeapon.name}
+                onChange={(e) => setOffhandWeapon({ name: e.target.value })}
+                placeholder="Name (or pick from table above)"
+                className="w-full text-sm font-bold rounded px-2 py-1.5 mb-1.5"
+                style={{ background: "#fff", border: `1px solid ${palette.line}`, fontFamily: "Cinzel, serif", color: palette.ink }}
+              />
+              <div className="flex gap-1.5 flex-wrap">
+                <label className="flex items-center gap-1 text-xs" style={{ color: palette.inkSoft, fontFamily: "JetBrains Mono, monospace" }}>
+                  DMG
+                  <input value={hero.offhandWeapon.dmg} onChange={(e) => setOffhandWeapon({ dmg: e.target.value })}
+                    className="w-14 rounded px-1 py-0.5" style={{ border: `1px solid ${palette.line}` }} />
+                </label>
+                <label className="flex items-center gap-1 text-xs" style={{ color: palette.inkSoft, fontFamily: "JetBrains Mono, monospace" }}>
+                  ENC
+                  <input type="number" value={hero.offhandWeapon.enc} onChange={(e) => setOffhandWeapon({ enc: Number(e.target.value) || 0 })}
+                    className="w-9 rounded px-1 py-0.5" style={{ border: `1px solid ${palette.line}` }} />
+                </label>
+                <label className="flex items-center gap-1 text-xs" style={{ color: palette.inkSoft, fontFamily: "JetBrains Mono, monospace" }}>
+                  DUR
+                  <input type="number" value={hero.offhandWeapon.dur.cur} onChange={(e) => setOffhandWeapon({ dur: { ...hero.offhandWeapon.dur, cur: Number(e.target.value) || 0 } })}
+                    className="w-9 rounded px-1 py-0.5" style={{ border: `1px solid ${palette.line}` }} />
+                  /
+                  <input type="number" value={hero.offhandWeapon.dur.max} onChange={(e) => setOffhandWeapon({ dur: { ...hero.offhandWeapon.dur, max: Number(e.target.value) || 0 } })}
+                    className="w-9 rounded px-1 py-0.5" style={{ border: `1px solid ${palette.line}` }} />
+                </label>
+              </div>
+              {offhandWeaponRef && (
+                <div className="text-[10px] mt-1 rounded px-2 py-1" style={{ background: "#00000008", color: palette.inkSoft, fontFamily: "Crimson Pro, serif" }}>
+                  Class {offhandWeaponRef.class}{offhandWeaponRef.special ? ` · ${offhandWeaponRef.special}` : ""} · {offhandWeaponRef.cost}c (avail {offhandWeaponRef.avail})
+                </div>
+              )}
+              {dualWieldDmgBonus != null ? (
+                <div className="text-[10px] mt-1 rounded px-2 py-1 font-semibold" style={{ background: "#00000010", color: palette.forestDark, fontFamily: "Crimson Pro, serif" }}>
+                  Dual Wield active: +{dualWieldDmgBonus} DMG with this offhand weapon, +5 when parrying with two weapons.
+                </div>
+              ) : offhandNotDualWieldable ? (
+                <div className="text-[10px] mt-1 rounded px-2 py-1 font-semibold" style={{ background: "#00000010", color: palette.crimson, fontFamily: "Crimson Pro, serif" }}>
+                  {offhandWeaponRef.name} isn't tagged Dual Wield in the rulebook — it can't be used as an offhand weapon.
+                </div>
+              ) : null}
+              <p className="text-[10px] mt-1 italic" style={{ color: palette.inkSoft, fontFamily: "Crimson Pro, serif" }}>
+                Requires the Dual Wield talent (DEX 60) — shown because {hero.name || "this hero"} has it.
+              </p>
+            </div>
+          )}
 
           {/* Armour */}
           <div className="mb-2">
@@ -12019,13 +12179,29 @@ function TurnTab({ party, setParty, heroes, updateHero, addLog, pushToast }) {
   const [turnResult, setTurnResult] = useState(null);
 
   const rollStartOfTurn = () => {
+    // Step 1 of the Turn Sequence: the Scenario die roll always begins a new turn, so
+    // this also advances the round counter, resets every hero's AP to 2, and ticks down
+    // light sources — the same mechanics "Next Round" used to require a separate tap for.
     const lines = [];
+    heroes.forEach((h) => updateHero(h.id, { ...h, ap: 2 }));
+    const wentOut = [];
+    const surviving = [];
+    (party.lightSources || []).forEach((l) => {
+      const remaining = l.remaining - 1;
+      if (remaining <= 0) wentOut.push(l.name);
+      else surviving.push({ ...l, remaining });
+    });
+    const nextRoundNum = party.round + 1;
+
     const scenarioRoll = rollDie(10);
+    lines.push(`Round ${nextRoundNum} begins — AP reset for all heroes.`);
+    if (wentOut.length) lines.push(`Light source(s) went out: ${wentOut.join(", ")}.`);
     lines.push(`Scenario die: ${scenarioRoll}`);
     if (scenarioRoll < 9) {
       lines.push("No Threat roll this turn.");
+      setParty((prev) => ({ ...prev, round: nextRoundNum, lightSources: surviving }));
       setTurnResult({ lines });
-      addLog(`Start of turn — Scenario die ${scenarioRoll}: no Threat roll.`);
+      addLog(`Start of turn: ${lines.join(" ")}`);
       return;
     }
     const threatRoll = rollDie(20);
@@ -12050,7 +12226,7 @@ function TurnTab({ party, setParty, heroes, updateHero, addLog, pushToast }) {
       lines.push(`At/below Threat — Not-in-Battle table (${tableRoll}): ${entry.title}. ${entry.text}`);
       lines.push(`Threat ${entry.decrease} (now ${newThreat}).`);
     }
-    setParty((prev) => ({ ...prev, threat: newThreat }));
+    setParty((prev) => ({ ...prev, round: nextRoundNum, lightSources: surviving, threat: newThreat }));
     setTurnResult({ lines });
     addLog(`Start of turn: ${lines.join(" ")}`);
   };
@@ -12066,20 +12242,6 @@ function TurnTab({ party, setParty, heroes, updateHero, addLog, pushToast }) {
     const hero = heroes.find((h) => h.id === heroId);
     if (!hero) return;
     updateHero(hero.id, { ...hero, ap: Math.max(0, value) });
-  };
-
-  const nextRound = () => {
-    heroes.forEach((h) => updateHero(h.id, { ...h, ap: 2 }));
-    const wentOut = [];
-    const surviving = [];
-    (party.lightSources || []).forEach((l) => {
-      const remaining = l.remaining - 1;
-      if (remaining <= 0) wentOut.push(l.name);
-      else surviving.push({ ...l, remaining });
-    });
-    const nextRoundNum = party.round + 1;
-    setParty((prev) => ({ ...prev, round: nextRoundNum, lightSources: surviving }));
-    addLog(`Round ${nextRoundNum} begins — AP reset for all heroes.${wentOut.length ? ` Light source(s) went out: ${wentOut.join(", ")}.` : ""}`);
   };
 
   // Trading Gear — 1 AP per hero involved, LOS required (per the book). Moves a single
@@ -12275,21 +12437,40 @@ function TurnTab({ party, setParty, heroes, updateHero, addLog, pushToast }) {
       <Panel className="mb-4">
         <SectionTitle icon={Dice5}>Start of Turn</SectionTitle>
         <p className="text-xs mb-2" style={{ color: palette.inkSoft, fontFamily: "Crimson Pro, serif", fontStyle: "italic" }}>
-          Rolls the Scenario die (1d10); on a 9-10 it rolls Threat (1d20) and, if triggered, the matching Threat Table — applying the result to Threat automatically.
+          Rolling advances the round: AP resets to 2 for every hero, light sources count down, then the Scenario die (1d10) is rolled — on a 9-10 it rolls Threat (1d20) and, if triggered, the matching Threat Table, applying the result to Threat automatically.
         </p>
-        <button
-          onClick={() => setInBattle((v) => !v)}
-          className="w-full mb-2 text-xs px-2 py-2 rounded font-semibold active:scale-95 transition-transform"
-          style={{ background: inBattle ? palette.crimsonDark : "#00000010", color: inBattle ? palette.parchment : palette.ink, fontFamily: "Cinzel, serif" }}
-        >
-          {inBattle ? "In Battle — rolls the In-Combat table" : "Not in Battle — rolls the Wandering/Exploration table"}
-        </button>
+        <div className="flex items-center gap-3 mb-2">
+          <div
+            className="rounded-full flex items-center justify-center font-bold text-2xl shrink-0"
+            style={{ width: 56, height: 56, background: palette.forestDark, color: palette.parchment, fontFamily: "JetBrains Mono, monospace", border: `3px solid ${palette.ink}` }}
+            title="Current round"
+          >
+            {party.round}
+          </div>
+          <div className="flex-1 flex flex-col gap-1.5">
+            <button
+              onClick={() => setInBattle((v) => !v)}
+              className="w-full text-xs px-2 py-2 rounded font-semibold active:scale-95 transition-transform"
+              style={{ background: inBattle ? palette.crimsonDark : "#00000010", color: inBattle ? palette.parchment : palette.ink, fontFamily: "Cinzel, serif" }}
+            >
+              {inBattle ? "In Battle — In-Combat table" : "Not in Battle — Wandering/Exploration table"}
+            </button>
+          </div>
+          <button
+            onClick={resetRound}
+            className="px-3 py-2 rounded text-xs font-semibold active:scale-95 transition-transform shrink-0 self-stretch"
+            style={{ background: "#00000015", color: palette.inkSoft }}
+            title="Reset round to 1 and AP for all heroes"
+          >
+            <RotateCcw size={14} />
+          </button>
+        </div>
         <button
           onClick={rollStartOfTurn}
           className="w-full mb-2 text-sm px-3 py-2 rounded font-bold active:scale-95 transition-transform"
           style={{ background: palette.gold, color: palette.charcoal, fontFamily: "Cinzel, serif" }}
         >
-          Roll It
+          Roll Start of Turn (advances round)
         </button>
         {turnResult && (
           <div className="rounded p-2" style={{ background: "#00000010" }}>
@@ -12368,37 +12549,6 @@ function TurnTab({ party, setParty, heroes, updateHero, addLog, pushToast }) {
             )}
           </>
         )}
-      </Panel>
-      <Panel className="mb-4">
-        <SectionTitle icon={Timer}>Round</SectionTitle>
-        <div className="flex items-center gap-3 mb-3">
-          <div
-            className="rounded-full flex items-center justify-center font-bold text-2xl"
-            style={{ width: 64, height: 64, background: palette.forestDark, color: palette.parchment, fontFamily: "JetBrains Mono, monospace", border: `3px solid ${palette.ink}` }}
-          >
-            {party.round}
-          </div>
-          <div className="flex-1 flex gap-2">
-            <button
-              onClick={nextRound}
-              className="flex-1 text-sm px-3 py-2 rounded font-bold active:scale-95 transition-transform"
-              style={{ background: palette.gold, color: palette.charcoal, fontFamily: "Cinzel, serif" }}
-            >
-              Next Round
-            </button>
-            <button
-              onClick={resetRound}
-              className="px-3 py-2 rounded text-xs font-semibold active:scale-95 transition-transform"
-              style={{ background: "#00000015", color: palette.inkSoft }}
-              title="Reset round to 1 and AP for all heroes"
-            >
-              <RotateCcw size={14} />
-            </button>
-          </div>
-        </div>
-        <p className="text-xs" style={{ color: palette.inkSoft, fontFamily: "Crimson Pro, serif", fontStyle: "italic" }}>
-          "Next Round" resets every hero's AP to 2, and counts down any tracked light sources — removing any that go out.
-        </p>
       </Panel>
 
       <Panel className="mb-4">
@@ -15576,7 +15726,17 @@ function TravelTab({ party, setParty, heroes, addLog, updateHero }) {
           {dungeonState === "travel" && (
             <>
               <button
-                onClick={() => setDungeonState("settlement")}
+                onClick={() => {
+                  // Returning to a settlement clears each hero's "01-05 permanent
+                  // improvement used" flags — the rulebook allows one such increase
+                  // "once between each settlement visit", not per dungeon.
+                  heroes.forEach((h) => {
+                    if (h.skillImprovementsUsed && Object.keys(h.skillImprovementsUsed).length > 0) {
+                      updateHero(h.id, { ...h, skillImprovementsUsed: {} });
+                    }
+                  });
+                  setDungeonState("settlement");
+                }}
                 className="flex-1 text-xs py-2 rounded font-semibold"
                 style={{ background: palette.forest, color: palette.parchment, fontFamily: "Cinzel, serif" }}
               >

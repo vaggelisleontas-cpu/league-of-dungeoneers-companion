@@ -3,6 +3,15 @@
 All notable changes to this project are documented here, following
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) conventions.
 
+## [1.56.0] — 2026-08-29
+
+### Added
+- 01-05 improvement tracker: a small toggle next to every stat and skill marks the permanent +1 as already claimed, and clears automatically the next time the party arrives at a settlement — matching the rulebook's "once between each settlement visits" wording rather than resetting per dungeon
+- Offhand Weapon slot on the hero sheet, unlocked once a hero has the Dual Wield talent. Picking a Dual Wield-tagged weapon shows its DMG bonus and the +5 two-weapon parry bonus automatically; picking a non-Dual-Wield weapon flags that it can't be used offhand
+
+### Changed
+- Start of Turn now advances the round in the same action: rolling it resets every hero's AP to 2, counts down light sources, and rolls the Scenario die (and Threat, if triggered) in one tap — removing the separate "Next Round" step. The round counter moved up into the Start of Turn panel so it's still visible at a glance
+
 ## [1.55.0] — 2026-08-25
 
 ### Changed
