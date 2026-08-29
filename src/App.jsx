@@ -3749,6 +3749,15 @@ function BuyMeACoffeeButton() {
 // ---------- Changelog ----------
 const CHANGELOG_DATA = [
   {
+    version: "1.56.1",
+    date: "2026-08-29",
+    sections: {
+      "Fixed": [
+        "Offhand Weapon picker now only lists weapons actually tagged Dual Wield in the rulebook, instead of the full weapon table — no more picking something like a Morning Star and getting told it can't be used offhand after the fact",
+      ],
+    },
+  },
+  {
     version: "1.56.0",
     date: "2026-08-29",
     sections: {
@@ -7698,8 +7707,9 @@ function HeroCard({ hero, update, remove, addLog, pushToast, party, setParty, go
               >
                 <option value="">Pick from table…</option>
                 {(() => {
+                  const dualWieldable = WEAPONS.filter((w) => /Dual Wield \+\d+/i.test(w.special || ""));
                   const ownedNames = new Set((hero.backpack || []).map((b) => b.name));
-                  const owned = WEAPONS.filter((w) => ownedNames.has(w.name));
+                  const owned = dualWieldable.filter((w) => ownedNames.has(w.name));
                   return (
                     <>
                       {owned.length > 0 && (
@@ -7709,8 +7719,8 @@ function HeroCard({ hero, update, remove, addLog, pushToast, party, setParty, go
                           ))}
                         </optgroup>
                       )}
-                      <optgroup label="All Items (reference)">
-                        {WEAPONS.map((w) => (
+                      <optgroup label="All Dual Wield Weapons (reference)">
+                        {dualWieldable.map((w) => (
                           <option key={`o-${w.name}`} value={w.name}>{w.name} ({w.dmg}, Class {w.class})</option>
                         ))}
                       </optgroup>

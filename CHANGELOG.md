@@ -3,6 +3,11 @@
 All notable changes to this project are documented here, following
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) conventions.
 
+## [1.56.1] — 2026-08-29
+
+### Fixed
+- Offhand Weapon picker now only lists weapons actually tagged Dual Wield in the rulebook, instead of the full weapon table — no more picking something like a Morning Star and getting told it can't be used offhand after the fact
+
 ## [1.56.0] — 2026-08-29
 
 ### Added
