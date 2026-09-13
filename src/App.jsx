@@ -213,9 +213,7 @@ const BACKGROUNDS_DATA = [
   {
     id: "poverty",roll: 9, name: "Poverty",
     text: "Personal Trait and Quest: May never make a purchase, or lend money, that would leave you with less than 10c. Must accumulate 1000c for your family - deliver it home. UPDATED REWARD: Gain the 'Pious' Talent!",
-    reward: { type: "xp", amount: 0, note: "Claim once you have saved 1000c and delivered it home." }
-  },
-
+    reward: {note: "Claim once you have saved 1000c and delivered it home." }
   },
   {
     id: "proving-your-worth", roll: 10, name: "Proving Your Worth",
