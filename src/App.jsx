@@ -254,8 +254,7 @@ const BACKGROUNDS_DATA = [
   },
   {
     id: "a-new-home", roll: 17, name: "A New Home",
-    text: "Personal Quest: Acquire the Bergmeister Estate. Reward: 1500 XP.",
-    reward: { type: "xp", amount: 1500 },
+    text: "Personal Quest: Once you have acquired the Bergmeister Estate, you may buy upgrades to it for 75% (RDD) of the listed price.",
   },
   {
     id: "the-apprentice", roll: 18, name: "The Apprentice",
