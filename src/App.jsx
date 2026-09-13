@@ -213,7 +213,7 @@ const BACKGROUNDS_DATA = [
   {
     id: "poverty", roll: 9, name: "Poverty",
     text: "Personal Trait and Quest: May never make a purchase, or lend money, that would leave you with less than 10c. Must accumulate 1000c for your family — deliver it at your (randomised, non-Silver-City) home settlement for 1 Movement Point. Reward: 2000 XP.",
-    reward: { type: "talent", name: "pious", note: "Claim once you've saved 1000c and delivered it home." },
+    reward: { type: "xp", amount: 0, note: "Gain the 'Pious' Talent! ("Claim once you've saved 1000c and delivered it home." },
   },
   {
     id: "proving-your-worth", roll: 10, name: "Proving Your Worth",
